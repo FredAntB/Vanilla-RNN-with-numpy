@@ -18,3 +18,8 @@ def char_to_one_hot(char_idx, vocab_size):
     vec = np.zeros((vocab_size, 1))
     vec[char_idx] = 1
     return vec
+
+# Convertir un vector one-hot a un caracter
+def one_hot_to_char(one_hot_vec, ix_to_char):
+    idx = np.argmax(one_hot_vec)
+    return ix_to_char[idx]
