@@ -54,6 +54,42 @@ class VanillaRNN:
             loss += categorical_cross_entropy_loss(target_one_hot.T, ps[t].T)
 
         return loss, xs, hs, ps
+    
+    def backward(self, xs, hs, ps, targets):
+        # Inicializar gradientes con ceros
+        dWxh = np.zeros_like(self.Wxh)
+        dWhh = np.zeros_like(self.Whh)
+        dWhy = np.zeros_like(self.Why)
+        dbh = np.zeros_like(self.bh)
+        dby = np.zeros_like(self.by)
+
+        dh_next = np.zeros_like(hs[0])
+
+        for t in reversed(range(len(xs))):
+            # 1. Derivada de la perdida con respecto a la salida
+            dy = np.copy(ps[t])
+            dy[targets[t]] -= 1  # softmax + cross-entropy derivada
+
+            # 2. Gradientes para pesos de salida y sesgo
+            dWhy += np.dot(dy, hs[t].T)
+            dby += dy
+
+            # 3. Propagar el error a traves del tiempo (hacia atras)
+            dh = np.dot(self.Why.T, dy) + dh_next
+            dh_raw = (1 - hs[t] ** 2) * dh  # derivada de tanh
+
+            dbh += dh_raw
+            dWxh += np.dot(dh_raw, xs[t].T)
+            dWhh += np.dot(dh_raw, hs[t-1].T)
+
+            # 4. Guardar error para siguiente paso temporal
+            dh_next = np.dot(self.Whh.T, dh_raw)
+
+        # Clipping (opcional pero recomendado)
+        for dparam in [dWxh, dWhh, dWhy, dbh, dby]:
+            np.clip(dparam, -5, 5, out=dparam)
+
+        return dWxh, dWhh, dWhy, dbh, dby
 
     def get_params(self):
         # Returns a tuple of current model parameters.
