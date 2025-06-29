@@ -95,3 +95,24 @@ class VanillaRNN:
         # Returns a tuple of current model parameters.
         return self.Wxh, self.Whh, self.Why, self.bh, self.by
 
+def sample(self, h, seed_ix, n):
+        # Samples a sequence of integers from the model.
+        # h is the initial hidden state, seed_ix is the first input character index,
+        # n is the number of characters to sample.
+
+        x = char_to_one_hot(seed_ix, self.vocab_size)
+        ixes = []
+        for t in range(n):
+            # Forward pass for one step
+            # Didn't use the forward function to not mess up the training
+            h_raw = np.dot(self.Wxh, x) + np.dot(self.Whh, h) + self.bh
+            h = tanh(h_raw)
+            y_raw = np.dot(self.Why, h) + self.by
+            p = softmax(y_raw)
+            
+            # Try and guess the next character from probabilities
+            ix = np.random.choice(range(self.vocab_size), p=p.ravel()) # .ravel() to flatten
+            
+            x = char_to_one_hot(ix, self.vocab_size) # New input is the sampled character
+            ixes.append(ix)
+        return ixes
