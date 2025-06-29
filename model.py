@@ -95,11 +95,3 @@ class VanillaRNN:
         # Returns a tuple of current model parameters.
         return self.Wxh, self.Whh, self.Why, self.bh, self.by
 
-    def update_params(self, dWxh, dWhh, dWhy, dbh, dby, learning_rate=1e-1):
-        # Updates parameters using simple SGD.
-        self.Wxh -= learning_rate * dWxh
-        self.Whh -= learning_rate * dWhh
-        self.Why -= learning_rate * dWhy
-        self.bh -= learning_rate * dbh
-        self.by -= learning_rate * dby
-
