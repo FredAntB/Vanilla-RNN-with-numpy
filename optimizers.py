@@ -1,88 +1,72 @@
 import numpy as np
 
-from data_preprocessing import text, char_to_ix, ix_to_char, vocab_size
-from model import VanillaRNN
-from optimizers import Adam 
+class Optimizer:
+    def update(self, params, grads, learning_rate):
+        raise NotImplementedError("Subclasses must implement the update method")
 
-# --- Hyperparameters for Training ---
-hidden_size = 100 # Size of the hidden layer of neurons
-seq_length = 25   # Length of sequence per training example
-learning_rate = 1e-3 # Learning rate 
+class SGD(Optimizer):
+    def update(self, params, grads, learning_rate):
+        for param, grad in zip(params, grads):
+            param -= learning_rate * grad
 
-# --- Epochs Configuration ---
-num_epochs = 20
+class Adagrad(Optimizer):
+    def __init__(self):
+        self.m = {} # Dictionary to store squared gradients for each parameter
 
-# Calculate approximate iterations per epoch
-# We divide by seq_length because each iteration processes one sequence.
-iterations_per_epoch = (len(text) - (seq_length + 1)) // seq_length 
-if iterations_per_epoch <= 0: # Handle very small texts or large seq_length
-    iterations_per_epoch = 1 
+    def update(self, params, grads, learning_rate):
+        # We'll use the memory to store per-parameter squared gradients
 
-# --- Instantiate the Model ---
-model = VanillaRNN(hidden_size, vocab_size)
-
-# --- Choose and Instantiate your Optimizer ---
-optimizer = Adam()
-
-print(f"Using optimizer: {type(optimizer).__name__}")
-print(f"Learning Rate: {learning_rate}")
-print(f"Total dataset length: {len(text)} characters")
-print(f"Sequence length (steps per iteration): {seq_length}")
-print(f"Approximate iterations per epoch: {iterations_per_epoch}")
-print(f"Total training for {num_epochs} epochs (~{num_epochs * iterations_per_epoch} iterations).\n")
-
-# --- Training Loop Setup ---
-global_iteration = 0 # This will track the total number of parameter updates across all epochs.
-
-# Initialize smooth_loss as an exponentially weighted moving average for stable monitoring.
-smooth_loss = -np.log(1.0/vocab_size) * seq_length # Initial loss for random predictions
-
-print("Starting training...\n")
-
-# --- Main Training Loop (Epochs Approach) ---
-for epoch in range(num_epochs):
-    print(f"--- Epoch {epoch+1}/{num_epochs} ---")
-    
-    # Reset RNN memory (hidden state) and data pointer at the beginning of each epoch
-    hprev = np.zeros((hidden_size, 1))
-    data_pointer = 0 # 'p' is now 'data_pointer' for clarity within the epoch loop
-
-    # Loop through the text for the current epoch, processing it in `seq_length` chunks
-    # The condition `data_pointer + seq_length + 1 < len(text)` ensures that
-    # both `inputs` (up to `p + seq_length`) and `targets` (up to `p + seq_length + 1`)
-    # can be fully extracted without going out of bounds.
-    while data_pointer + seq_length + 1 < len(text):
-        # Extract current input and target sequence indices
-        inputs = [char_to_ix[ch] for ch in text[data_pointer:data_pointer+seq_length]]
-        targets = [char_to_ix[ch] for ch in text[data_pointer+1:data_pointer+seq_length+1]]
-
-        # --- Forward Pass ---
-        loss, xs, hs, ps = model.forward(inputs, targets, hprev)
+        if not self.m: 
+            for i, param in enumerate(params):
+                # Use a unique key for each parameter based on its index
+                self.m[f'param_{i}'] = np.zeros_like(param)
         
-        # Update the smoothed loss for display
-        smooth_loss = smooth_loss * 0.999 + loss * 0.001
+        for i, (param, grad) in enumerate(zip(params, grads)):
+            mem_key = f'param_{i}'
+            self.m[mem_key] += grad * grad
+            param -= learning_rate * grad / (np.sqrt(self.m[mem_key]) + 1e-8)
+
+class RMSprop(Optimizer):
+    def __init__(self, decay_rate=0.99):
+        self.decay_rate = decay_rate
+        self.cache = {} # Dictionary to store squared gradients (moving average)
+
+    def update(self, params, grads, learning_rate):
+        if not self.cache:
+            for i, param in enumerate(params):
+                self.cache[f'param_{i}'] = np.zeros_like(param)
+
+        for i, (param, grad) in enumerate(zip(params, grads)):
+            cache_key = f'param_{i}'
+            self.cache[cache_key] = self.decay_rate * self.cache[cache_key] + (1 - self.decay_rate) * (grad ** 2)
+            param -= learning_rate * grad / (np.sqrt(self.cache[cache_key]) + 1e-8)
+
+class Adam(Optimizer):
+    def __init__(self, beta1=0.9, beta2=0.999, epsilon=1e-8):
+        self.beta1 = beta1
+        self.beta2 = beta2
+        self.epsilon = epsilon
+        self.m = {} # mean of gradients
+        self.v = {} # variance of gradients
+        self.t = 0  # Time step
+
+    def update(self, params, grads, learning_rate):
+        self.t += 1 
+
+        if not self.m: # Initialize moments on first call
+            for i, param in enumerate(params):
+                self.m[f'param_{i}'] = np.zeros_like(param)
+                self.v[f'param_{i}'] = np.zeros_like(param)
         
-        # --- Backward Pass ---
-        dWxh, dWhh, dWhy, dbh, dby = model.backward(xs, hs, ps, targets)
-        
-        # --- Optimizer Step ---
-        params = [model.Wxh, model.Whh, model.Why, model.bh, model.by]
-        grads = [dWxh, dWhh, dWhy, dbh, dby]
-        optimizer.update(params, grads, learning_rate)
+        for i, (param, grad) in enumerate(zip(params, grads)):
+            param_key = f'param_{i}'
 
-        # --- Update Hidden State for Next Iteration ---
-        hprev = hs[len(inputs) - 1]
+            # Update biased moments' estimate
+            self.m[param_key] = self.beta1 * self.m[param_key] + (1 - self.beta1) * grad
+            self.v[param_key] = self.beta2 * self.v[param_key] + (1 - self.beta2) * (grad ** 2)
 
-        if global_iteration % 100 == 0: 
-            print(f'  Iter {global_iteration}, Epoch {epoch+1}, Loss: {smooth_loss:.4f}')
-            
-            # Sample text to qualitatively observe model's learning
-            sample_ix = model.sample(hprev, inputs[0], 200) 
-            txt = ''.join(ix_to_char[ix] for ix in sample_ix)
-            print('  ----\n%s\n  ----\n' % (txt,))
+            # Compute bias-corrected moments' estimate
+            m_hat = self.m[param_key] / (1 - self.beta1 ** self.t)
+            v_hat = self.v[param_key] / (1 - self.beta2 ** self.t)
 
-        # --- Update Pointers for Next Iteration ---
-        data_pointer += seq_length # Move data pointer forward by the sequence length
-        global_iteration += 1 # Increment the global iteration counter
-
-print(f"\nTraining finished after {num_epochs} epochs. Total iterations: {global_iteration}")
+            param -= learning_rate * m_hat / (np.sqrt(v_hat) + self.epsilon)
