@@ -1,75 +1,88 @@
 import numpy as np
 
-from data_preprocessing import text, char_to_ix, ix_to_char, vocab_size, char_to_one_hot
+from data_preprocessing import text, char_to_ix, ix_to_char, vocab_size
 from model import VanillaRNN
 from optimizers import Adam 
 
 # --- Hyperparameters for Training ---
-hidden_size = 100 # size of hidden layer of neurons
-seq_length = 25   # sequence length for each training example
-learning_rate = 1e-3 # Initial learning rate
+hidden_size = 100 # Size of the hidden layer of neurons
+seq_length = 25   # Length of sequence per training example
+learning_rate = 1e-3 # Learning rate 
+
+# --- Epochs Configuration ---
+num_epochs = 20
+
+# Calculate approximate iterations per epoch
+# We divide by seq_length because each iteration processes one sequence.
+iterations_per_epoch = (len(text) - (seq_length + 1)) // seq_length 
+if iterations_per_epoch <= 0: # Handle very small texts or large seq_length
+    iterations_per_epoch = 1 
 
 # --- Instantiate the Model ---
 model = VanillaRNN(hidden_size, vocab_size)
 
 # --- Choose and Instantiate your Optimizer ---
-optimizer = Adam(learning_rate=1e-3) 
+optimizer = Adam()
+
+print(f"Using optimizer: {type(optimizer).__name__}")
+print(f"Learning Rate: {learning_rate}")
+print(f"Total dataset length: {len(text)} characters")
+print(f"Sequence length (steps per iteration): {seq_length}")
+print(f"Approximate iterations per epoch: {iterations_per_epoch}")
+print(f"Total training for {num_epochs} epochs (~{num_epochs * iterations_per_epoch} iterations).\n")
 
 # --- Training Loop Setup ---
-n, p = 0, 0 # n: iteration counter, p: pointer to position in the text data
-# Initialize smooth_loss: This is an exponentially weighted moving average of the loss.
-# It helps to visualize training progress without being too noisy.
-# Initial value is set to the loss if the model predicted randomly (uniform probability).
-smooth_loss = -np.log(1.0/vocab_size) * seq_length # Loss at iteration 0 (random guesses)
+global_iteration = 0 # This will track the total number of parameter updates across all epochs.
 
-# --- Main Training Loop ---
-while True:
-    # Prepare inputs and targets for the current sequence
-    # If the data pointer 'p' goes beyond the text length (or it's the very first iteration)
-    if p + seq_length + 1 >= len(text) or n == 0: 
-        hprev = np.zeros((hidden_size, 1)) # Reset RNN memory (hidden state)
-        p = 0 # Go from start of data (epoch restart)
+# Initialize smooth_loss as an exponentially weighted moving average for stable monitoring.
+smooth_loss = -np.log(1.0/vocab_size) * seq_length # Initial loss for random predictions
 
-    # Extract current input and target sequence indices
-    inputs = [char_to_ix[ch] for ch in text[p:p+seq_length]]
-    targets = [char_to_ix[ch] for ch in text[p+1:p+seq_length+1]]
+print("Starting training...\n")
 
-    # --- Forward Pass ---
-    # Perform the forward pass to get loss and intermediate activations
-    loss, xs, hs, ps = model.forward(inputs, targets, hprev)
+# --- Main Training Loop (Epochs Approach) ---
+for epoch in range(num_epochs):
+    print(f"--- Epoch {epoch+1}/{num_epochs} ---")
     
-    # Update the smoothed loss for display
-    smooth_loss = smooth_loss * 0.999 + loss * 0.001
-    
-    # --- Backward Pass ---
-    # Compute gradients with respect to model parameters
-    dWxh, dWhh, dWhy, dbh, dby = model.backward(xs, hs, ps, targets)
-    
-    # --- Optimizer Step ---
-    # Collect parameters and gradients into lists/tuples for the optimizer
-    params = [model.Wxh, model.Whh, model.Why, model.bh, model.by]
-    grads = [dWxh, dWhh, dWhy, dbh, dby]
+    # Reset RNN memory (hidden state) and data pointer at the beginning of each epoch
+    hprev = np.zeros((hidden_size, 1))
+    data_pointer = 0 # 'p' is now 'data_pointer' for clarity within the epoch loop
 
-    # Update parameters using the chosen optimizer
-    optimizer.update(params, grads, learning_rate)
+    # Loop through the text for the current epoch, processing it in `seq_length` chunks
+    # The condition `data_pointer + seq_length + 1 < len(text)` ensures that
+    # both `inputs` (up to `p + seq_length`) and `targets` (up to `p + seq_length + 1`)
+    # can be fully extracted without going out of bounds.
+    while data_pointer + seq_length + 1 < len(text):
+        # Extract current input and target sequence indices
+        inputs = [char_to_ix[ch] for ch in text[data_pointer:data_pointer+seq_length]]
+        targets = [char_to_ix[ch] for ch in text[data_pointer+1:data_pointer+seq_length+1]]
 
-    # --- Update Hidden State for Next Iteration ---
-    # The last hidden state of the current sequence becomes the initial hidden state
-    # for the next sequence. This allows the RNN to carry memory across sequences.
-    hprev = hs[len(inputs) - 1]
-
-    # --- Print Progress and Sample Text ---
-    if n % 100 == 0: # Print every 100 iterations
-        print(f'iter {n}, loss: {smooth_loss:.4f}') # print training loss
+        # --- Forward Pass ---
+        loss, xs, hs, ps = model.forward(inputs, targets, hprev)
         
-        # Sample 200 characters from the model to see its current generative ability
-        # We use the current hprev and the first character of the current input sequence as seed.
-        sample_ix = model.sample(hprev, inputs[0], 200) 
+        # Update the smoothed loss for display
+        smooth_loss = smooth_loss * 0.999 + loss * 0.001
         
-        # Convert sampled indices back to characters for display
-        txt = ''.join(ix_to_char[ix] for ix in sample_ix)
-        print('----\n%s\n----' % (txt,)) # Print the generated text nicely formatted
+        # --- Backward Pass ---
+        dWxh, dWhh, dWhy, dbh, dby = model.backward(xs, hs, ps, targets)
+        
+        # --- Optimizer Step ---
+        params = [model.Wxh, model.Whh, model.Why, model.bh, model.by]
+        grads = [dWxh, dWhh, dWhy, dbh, dby]
+        optimizer.update(params, grads, learning_rate)
 
-    # --- Update Pointers for Next Iteration ---
-    p += seq_length # Move data pointer forward by sequence length
-    n += 1 # Increment iteration counter
+        # --- Update Hidden State for Next Iteration ---
+        hprev = hs[len(inputs) - 1]
+
+        if global_iteration % 100 == 0: 
+            print(f'  Iter {global_iteration}, Epoch {epoch+1}, Loss: {smooth_loss:.4f}')
+            
+            # Sample text to qualitatively observe model's learning
+            sample_ix = model.sample(hprev, inputs[0], 200) 
+            txt = ''.join(ix_to_char[ix] for ix in sample_ix)
+            print('  ----\n%s\n  ----\n' % (txt,))
+
+        # --- Update Pointers for Next Iteration ---
+        data_pointer += seq_length # Move data pointer forward by the sequence length
+        global_iteration += 1 # Increment the global iteration counter
+
+print(f"\nTraining finished after {num_epochs} epochs. Total iterations: {global_iteration}")
