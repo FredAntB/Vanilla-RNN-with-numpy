@@ -6,11 +6,11 @@ from optimizers import Adam
 
 # --- Hyperparameters for Training ---
 hidden_size = 100 # Size of the hidden layer of neurons
-seq_length = 25   # Length of sequence per training example
+seq_length = 300   # Length of sequence per training example
 learning_rate = 1e-3 # Learning rate 
 
 # --- Epochs Configuration ---
-num_epochs = 20
+num_epochs = 5
 
 # Calculate approximate iterations per epoch
 # We divide by seq_length because each iteration processes one sequence.
@@ -86,3 +86,5 @@ for epoch in range(num_epochs):
         global_iteration += 1 # Increment the global iteration counter
 
 print(f"\nTraining finished after {num_epochs} epochs. Total iterations: {global_iteration}")
+model.save_model("rnn_trained.npz")
+

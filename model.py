@@ -95,7 +95,7 @@ class VanillaRNN:
         # Returns a tuple of current model parameters.
         return self.Wxh, self.Whh, self.Why, self.bh, self.by
 
-def sample(self, h, seed_ix, n):
+    def sample(self, h, seed_ix, n):
         # Samples a sequence of integers from the model.
         # h is the initial hidden state, seed_ix is the first input character index,
         # n is the number of characters to sample.
@@ -110,9 +110,30 @@ def sample(self, h, seed_ix, n):
             y_raw = np.dot(self.Why, h) + self.by
             p = softmax(y_raw)
             
+            # Normalize probabilities to sum to 1
+            p_flat = p.ravel()
+            p_flat = p_flat / np.sum(p_flat)
             # Try and guess the next character from probabilities
-            ix = np.random.choice(range(self.vocab_size), p=p.ravel()) # .ravel() to flatten
+            ix = np.random.choice(range(self.vocab_size), p=p_flat) # .ravel() to flatten
             
             x = char_to_one_hot(ix, self.vocab_size) # New input is the sampled character
             ixes.append(ix)
         return ixes
+    
+    def save_model(self, filepath="rnn_weights.npz"):
+        np.savez(filepath,
+                 Wxh=self.Wxh,
+                 Whh=self.Whh,
+                 Why=self.Why,
+                 bh=self.bh,
+                 by=self.by)
+        print(f"Model saved to '{filepath}'")
+
+    def load_model(self, filepath="rnn_weights.npz"):
+        weights = np.load(filepath)
+        self.Wxh = weights["Wxh"]
+        self.Whh = weights["Whh"]
+        self.Why = weights["Why"]
+        self.bh = weights["bh"]
+        self.by = weights["by"]
+        print(f"Model loaded from '{filepath}'")
