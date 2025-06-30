@@ -8,12 +8,10 @@ def sigmoid(x):
     return 1 / (1 + np.exp(-x))
 
 def softmax(x):
-    if x.ndim == 1:
-        exp_x = np.exp(x - np.max(x))
-    else: # Assumes x is 2D -> (batch_size, num_features)
-        exp_x = np.exp(x - np.max(x, axis=1, keepdims=True))
-    
-    return exp_x / np.sum(exp_x, axis=x.ndim - 1, keepdims=True)
+    x = x - np.max(x)  # Estabilidad numérica
+    exp_x = np.exp(x)
+    return exp_x / np.sum(exp_x)
+
 
 def relu(x):
     return np.maximum(0, x)
