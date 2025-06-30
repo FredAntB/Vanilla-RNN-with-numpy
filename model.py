@@ -1,0 +1,139 @@
+import numpy as np
+from functions import tanh, softmax, categorical_cross_entropy_loss
+from data_preprocessing import vocab_size, char_to_one_hot
+
+class VanillaRNN:
+    def __init__(self, hidden_size, vocab_size):
+        # Hyperparameters
+        self.hidden_size = hidden_size
+        self.vocab_size = vocab_size
+
+        # Initialize weights with small random values to break symmetry
+        # input to hidden
+        self.Wxh = np.random.randn(hidden_size, vocab_size) * 0.01 
+        # hidden to hidden
+        self.Whh = np.random.randn(hidden_size, hidden_size) * 0.01 
+        # hidden to output
+        self.Why = np.random.randn(vocab_size, hidden_size) * 0.01 
+
+        # Initialize biases to zeros
+        self.bh = np.zeros((hidden_size, 1)) # hidden bias
+        self.by = np.zeros((vocab_size, 1))  # output bias
+
+    def forward(self, inputs, targets, hprev):
+        # Dictionaries to store activations/inputs for backpropagation
+        xs, hs, ps = {}, {}, {}
+        # Store the initial hidden state for backprop
+        hs[-1] = np.copy(hprev) 
+
+        loss = 0
+
+        for t in range(len(inputs)):
+            # 1. Input layer (one-hot encoding)
+            xs[t] = char_to_one_hot(inputs[t], self.vocab_size)
+
+            # 2. Hidden layer calculation
+            # h_t = tanh(Wxh @ x_t + Whh @ h_{t-1} + bh)
+            # wpb -> weight + bias -> alludes the values inside tanh
+            wpb = np.dot(self.Wxh, xs[t]) + np.dot(self.Whh, hs[t-1]) + self.bh
+            hs[t] = tanh(wpb)
+
+            # 3. Output layer calculation
+            # y_t = Why @ h_t + by
+            # These are the logits
+            y_t_raw = np.dot(self.Why, hs[t]) + self.by 
+            ps[t] = softmax(y_t_raw) # get probabilities
+
+            # 4. Calculate Loss
+            # Get the one-hot target for loss calculation
+            target_one_hot = char_to_one_hot(targets[t], self.vocab_size)
+
+            # categorical_cross_entropy_loss expects (batch_size, num_classes)
+            # current vectors are (num_classes, 1)
+            # so transpose them to (1, num_classes)
+            loss += categorical_cross_entropy_loss(target_one_hot.T, ps[t].T)
+
+        return loss, xs, hs, ps
+    
+    def backward(self, xs, hs, ps, targets):
+        # Inicializar gradientes con ceros
+        dWxh = np.zeros_like(self.Wxh)
+        dWhh = np.zeros_like(self.Whh)
+        dWhy = np.zeros_like(self.Why)
+        dbh = np.zeros_like(self.bh)
+        dby = np.zeros_like(self.by)
+
+        dh_next = np.zeros_like(hs[0])
+
+        for t in reversed(range(len(xs))):
+            # 1. Derivada de la perdida con respecto a la salida
+            dy = np.copy(ps[t])
+            dy[targets[t]] -= 1  # softmax + cross-entropy derivada
+
+            # 2. Gradientes para pesos de salida y sesgo
+            dWhy += np.dot(dy, hs[t].T)
+            dby += dy
+
+            # 3. Propagar el error a traves del tiempo (hacia atras)
+            dh = np.dot(self.Why.T, dy) + dh_next
+            dh_raw = (1 - hs[t] ** 2) * dh  # derivada de tanh
+
+            dbh += dh_raw
+            dWxh += np.dot(dh_raw, xs[t].T)
+            dWhh += np.dot(dh_raw, hs[t-1].T)
+
+            # 4. Guardar error para siguiente paso temporal
+            dh_next = np.dot(self.Whh.T, dh_raw)
+
+        # Clipping (opcional pero recomendado)
+        for dparam in [dWxh, dWhh, dWhy, dbh, dby]:
+            np.clip(dparam, -5, 5, out=dparam)
+
+        return dWxh, dWhh, dWhy, dbh, dby
+
+    def get_params(self):
+        # Returns a tuple of current model parameters.
+        return self.Wxh, self.Whh, self.Why, self.bh, self.by
+
+    def sample(self, h, seed_ix, n):
+        # Samples a sequence of integers from the model.
+        # h is the initial hidden state, seed_ix is the first input character index,
+        # n is the number of characters to sample.
+
+        x = char_to_one_hot(seed_ix, self.vocab_size)
+        ixes = []
+        for t in range(n):
+            # Forward pass for one step
+            # Didn't use the forward function to not mess up the training
+            h_raw = np.dot(self.Wxh, x) + np.dot(self.Whh, h) + self.bh
+            h = tanh(h_raw)
+            y_raw = np.dot(self.Why, h) + self.by
+            p = softmax(y_raw)
+            
+            # Normalize probabilities to sum to 1
+            p_flat = p.ravel()
+            p_flat = p_flat / np.sum(p_flat)
+            # Try and guess the next character from probabilities
+            ix = np.random.choice(range(self.vocab_size), p=p_flat) # .ravel() to flatten
+            
+            x = char_to_one_hot(ix, self.vocab_size) # New input is the sampled character
+            ixes.append(ix)
+        return ixes
+    
+    def save_model(self, filepath="rnn_weights.npz"):
+        np.savez(filepath,
+                 Wxh=self.Wxh,
+                 Whh=self.Whh,
+                 Why=self.Why,
+                 bh=self.bh,
+                 by=self.by)
+        print(f"Model saved to '{filepath}'")
+
+    def load_model(self, filepath="rnn_weights.npz"):
+        weights = np.load(filepath)
+        self.Wxh = weights["Wxh"]
+        self.Whh = weights["Whh"]
+        self.Why = weights["Why"]
+        self.bh = weights["bh"]
+        self.by = weights["by"]
+        print(f"Model loaded from '{filepath}'")
